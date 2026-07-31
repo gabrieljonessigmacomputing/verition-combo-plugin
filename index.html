@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Verition Combo — dual-axis bar + line</title>
+<script src="https://unpkg.com/@sigmacomputing/plugin"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;background:transparent;color:#0B2E4F;overflow:hidden}
+  #wrap{height:100%;width:100%;padding:8px 10px 4px;display:flex;flex-direction:column}
+  #ttl{font-size:14px;font-weight:700;color:#0B2E4F;margin-bottom:2px}
+  #cv{flex:1;min-height:0}
+  #empty{display:none;height:100%;align-items:center;justify-content:center;color:#9aa;font-size:14px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="ttl">YTD PnL</div>
+  <canvas id="cv"></canvas>
+  <div id="empty">No data</div>
+</div>
+<script>
+(function(){
+  var client=(window.sigmaComputing&&window.sigmaComputing.plugin&&window.sigmaComputing.plugin.client)||null;
+  var NAVY="#0B2E4F", BLUE="#2E6BB8";
+  var defs=[
+    {name:'source',type:'element'},
+    {name:'x',type:'column',source:'source',label:'X axis (date / category)'},
+    {name:'bar',type:'column',source:'source',allowedTypes:['number','integer'],label:'Bars — LEFT axis'},
+    {name:'line',type:'column',source:'source',allowedTypes:['number','integer'],label:'Line — RIGHT axis'},
+    {name:'title',type:'text',label:'Title',defaultValue:'YTD PnL'},
+    {name:'barLabel',type:'text',label:'Left-axis label',defaultValue:'Daily Gross PnL'},
+    {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
+    {name:'rightMin',type:'text',label:'Right axis MIN (blank = auto; 0 hard-caps at zero)',defaultValue:'0'},
+    {name:'rightMax',type:'text',label:'Right axis MAX (blank = auto)',defaultValue:''},
+    {name:'leftMin',type:'text',label:'Left axis MIN (blank = auto)',defaultValue:''}
+  ];
+  if(client) client.config.configureEditorPanel(defs);
+
+  var chart=null;
+  function si(v){ // compact $ formatting
+    var a=Math.abs(v), s=v<0?'-':'';
+    if(a>=1e9) return s+'$'+(a/1e9).toFixed(a>=1e11?0:1)+'B';
+    if(a>=1e6) return s+'$'+(a/1e6).toFixed(a>=1e8?0:1)+'M';
+    if(a>=1e3) return s+'$'+(a/1e3).toFixed(0)+'K';
+    return s+'$'+a.toFixed(0);
+  }
+  function fmtX(v){
+    if(typeof v==='number' && v>1e11){ var d=new Date(v); return (d.getUTCMonth()+1)+'/'+String(d.getUTCFullYear()).slice(2); }
+    if(v instanceof Date){ return (v.getUTCMonth()+1)+'/'+String(v.getUTCFullYear()).slice(2); }
+    return String(v);
+  }
+  function numOrNull(s){ if(s===''||s===null||s===undefined) return null; var n=Number(s); return isNaN(n)?null:n; }
+
+  function draw(labels,bars,lines,cfg){
+    document.getElementById('ttl').textContent=(cfg&&cfg.title)||'YTD PnL';
+    var empty=!labels.length;
+    document.getElementById('empty').style.display=empty?'flex':'none';
+    document.getElementById('cv').style.display=empty?'none':'block';
+    if(empty){ if(chart){chart.destroy();chart=null;} return; }
+    var ctx=document.getElementById('cv').getContext('2d');
+    if(chart) chart.destroy();
+    chart=new Chart(ctx,{
+      data:{labels:labels,datasets:[
+        {type:'bar',label:(cfg&&cfg.barLabel)||'Bars',data:bars,yAxisID:'yL',
+         backgroundColor:BLUE,borderColor:BLUE,barPercentage:0.9,categoryPercentage:0.96,order:2},
+        {type:'line',label:(cfg&&cfg.lineLabel)||'Line',data:lines,yAxisID:'yR',
+         borderColor:NAVY,backgroundColor:NAVY,borderWidth:2,pointRadius:0,tension:0.25,order:1}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'top',labels:{boxWidth:12,font:{size:11}}},
+          tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+si(c.parsed.y);}}}},
+        scales:{
+          x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,font:{size:10}}},
+          yL:{position:'left',grid:{color:'#eef2f7'},min:numOrNull(cfg&&cfg.leftMin),
+              ticks:{font:{size:10},callback:function(v){return si(v);}}},
+          yR:{position:'right',grid:{drawOnChartArea:false},
+              min:numOrNull(cfg&&cfg.rightMin), max:numOrNull(cfg&&cfg.rightMax),
+              ticks:{font:{size:10},callback:function(v){return si(v);}}}
+        }}
+    });
+  }
+
+  // group rows by x: bars summed, line = last value in the period (period-end)
+  function recompute(data,cfg){
+    if(!data||!cfg||!cfg.x){ return draw([],[],[], cfg); }
+    var xs=data[cfg.x]||[], bs=data[cfg.bar]||[], ls=data[cfg.line]||[];
+    var order=[], agg={};
+    for(var i=0;i<xs.length;i++){
+      var k=xs[i]; var kk=(k instanceof Date)?k.getTime():k;
+      if(!(kk in agg)){agg[kk]={x:k,bar:0,line:null,_raw:kk};order.push(kk);}
+      var b=Number(bs[i]); if(!isNaN(b)) agg[kk].bar+=b;
+      var l=Number(ls[i]); if(!isNaN(l)) agg[kk].line=l; // last wins => period-end
+    }
+    order.sort(function(a,b){return (a>b?1:a<b?-1:0);});
+    var labels=[],bars=[],lines=[];
+    order.forEach(function(k){var r=agg[k];labels.push(fmtX(r.x));bars.push(r.bar);lines.push(r.line);});
+    draw(labels,bars,lines,cfg);
+  }
+
+  if(client){
+    var st={cfg:null,unsub:null};
+    client.config.subscribe(function(cfg){
+      st.cfg=cfg||{};
+      if(st.unsub){st.unsub();st.unsub=null;}
+      if(cfg&&cfg.source){
+        st.unsub=client.elements.subscribeToElementData(cfg.source,function(d){recompute(d,st.cfg);});
+      }else{ recompute(null,st.cfg); }
+    });
+  }else{
+    // standalone synthetic fallback (so it previews outside Sigma)
+    var L=[],B=[],C=[],cum=0;
+    for(var m=0;m<12;m++){var d=(Math.random()-0.42)*4e8;cum+=d;L.push((m+1)+'/26');B.push(d);C.push(Math.max(0,cum));}
+    draw(L,B,C,{title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL',rightMin:'0'});
+  }
+})();
+</script>
+</body>
+</html>
