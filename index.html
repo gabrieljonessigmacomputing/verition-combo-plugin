@@ -31,6 +31,7 @@
     {name:'x',type:'column',source:'source',label:'X axis (date / category)'},
     {name:'bar',type:'column',source:'source',allowedTypes:['number','integer'],label:'Bars — LEFT axis'},
     {name:'line',type:'column',source:'source',allowedTypes:['number','integer'],label:'Line — RIGHT axis'},
+    {name:'sort',type:'column',source:'source',label:'Sort key for period-end line (optional, e.g. raw date)'},
     {name:'title',type:'text',label:'Title',defaultValue:'YTD PnL'},
     {name:'barLabel',type:'text',label:'Left-axis label',defaultValue:'Daily Gross PnL'},
     {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
@@ -84,16 +85,18 @@
     });
   }
 
-  // group rows by x: bars summed, line = last value in the period (period-end)
+  // group rows by x: bars SUMMED; line = value at the MAX sort key in the period (period-end)
   function recompute(data,cfg){
     if(!data||!cfg||!cfg.x){ return draw([],[],[], cfg); }
-    var xs=data[cfg.x]||[], bs=data[cfg.bar]||[], ls=data[cfg.line]||[];
+    var xs=data[cfg.x]||[], bs=data[cfg.bar]||[], ls=data[cfg.line]||[], ss=(cfg.sort?data[cfg.sort]:null);
     var order=[], agg={};
     for(var i=0;i<xs.length;i++){
       var k=xs[i]; var kk=(k instanceof Date)?k.getTime():k;
-      if(!(kk in agg)){agg[kk]={x:k,bar:0,line:null,_raw:kk};order.push(kk);}
+      if(!(kk in agg)){agg[kk]={x:k,bar:0,line:null,at:-Infinity};order.push(kk);}
       var b=Number(bs[i]); if(!isNaN(b)) agg[kk].bar+=b;
-      var l=Number(ls[i]); if(!isNaN(l)) agg[kk].line=l; // last wins => period-end
+      var l=Number(ls[i]);
+      var sv=ss?Number(ss[i]):i;               // sort by provided key, else row order
+      if(!isNaN(l) && sv>=agg[kk].at){ agg[kk].line=l; agg[kk].at=sv; }
     }
     order.sort(function(a,b){return (a>b?1:a<b?-1:0);});
     var labels=[],bars=[],lines=[];
