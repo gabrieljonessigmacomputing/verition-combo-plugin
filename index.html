@@ -35,9 +35,8 @@
     {name:'title',type:'text',label:'Title',defaultValue:'YTD PnL'},
     {name:'barLabel',type:'text',label:'Left-axis label',defaultValue:'Daily Gross PnL'},
     {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
-    {name:'rightMin',type:'text',label:'Right axis MIN (blank = auto; 0 hard-caps at zero)',defaultValue:'0'},
-    {name:'rightMax',type:'text',label:'Right axis MAX (blank = auto)',defaultValue:''},
-    {name:'leftMin',type:'text',label:'Left axis MIN (blank = auto)',defaultValue:''}
+    {name:'alignZero',type:'toggle',label:'Align left & right zero baselines',defaultValue:true},
+    {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'}
   ];
   if(client) client.config.configureEditorPanel(defs);
 
@@ -54,7 +53,25 @@
     if(v instanceof Date){ return (v.getUTCMonth()+1)+'/'+String(v.getUTCFullYear()).slice(2); }
     return String(v);
   }
-  function numOrNull(s){ if(s===''||s===null||s===undefined) return null; var n=Number(s); return isNaN(n)?null:n; }
+  // Compute left/right axis ranges so the TWO ZEROS sit at the same pixel height.
+  // left zero fraction f = (0-Lmin)/(Lmax-Lmin); we pick Rmin/Rmax so the right zero
+  // lands at the same f, while still showing all line data (+headroom).
+  function computeAxes(bars,lines,cfg){
+    var padf = 1 + (Number((cfg&&cfg.pad)||8)||8)/100;
+    var bMax=0,bMin=0,lMax=0,lMin=0,i,v;
+    for(i=0;i<bars.length;i++){v=Number(bars[i]); if(!isNaN(v)){if(v>bMax)bMax=v; if(v<bMin)bMin=v;}}
+    for(i=0;i<lines.length;i++){v=Number(lines[i]); if(!isNaN(v)){if(v>lMax)lMax=v; if(v<lMin)lMin=v;}}
+    var Lmax=bMax*padf, Lmin=bMin*padf; if(Lmax===0&&Lmin===0)Lmax=1;
+    if(cfg&&cfg.alignZero===false){
+      return {Lmin:Lmin,Lmax:Lmax,Rmin:Math.min(0,lMin)*padf,Rmax:(Math.max(0,lMax)||1)*padf};
+    }
+    var f=(0-Lmin)/(Lmax-Lmin); if(!isFinite(f)||f<0)f=0; if(f>1)f=1;
+    var Rhi=Math.max(0,lMax), Rlo=Math.min(0,lMin);
+    if(f<=0) return {Lmin:Lmin,Lmax:Lmax,Rmin:0,Rmax:(Rhi||1)*padf};
+    if(f>=1) return {Lmin:Lmin,Lmax:Lmax,Rmin:(Rlo||-1)*padf,Rmax:0};
+    var T=Math.max(Rhi/(1-f), (Rlo<0?(-Rlo)/f:0))*padf; if(T<=0)T=1;
+    return {Lmin:Lmin,Lmax:Lmax,Rmin:-f*T,Rmax:(1-f)*T};
+  }
 
   function draw(labels,bars,lines,cfg){
     document.getElementById('ttl').textContent=(cfg&&cfg.title)||'YTD PnL';
@@ -64,6 +81,7 @@
     if(empty){ if(chart){chart.destroy();chart=null;} return; }
     var ctx=document.getElementById('cv').getContext('2d');
     if(chart) chart.destroy();
+    var ax=computeAxes(bars,lines,cfg);
     chart=new Chart(ctx,{
       data:{labels:labels,datasets:[
         {type:'bar',label:(cfg&&cfg.barLabel)||'Bars',data:bars,yAxisID:'yL',
@@ -76,10 +94,9 @@
           tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+si(c.parsed.y);}}}},
         scales:{
           x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,font:{size:10}}},
-          yL:{position:'left',grid:{color:'#eef2f7'},min:numOrNull(cfg&&cfg.leftMin),
+          yL:{position:'left',grid:{color:'#eef2f7'},min:ax.Lmin,max:ax.Lmax,
               ticks:{font:{size:10},callback:function(v){return si(v);}}},
-          yR:{position:'right',grid:{drawOnChartArea:false},
-              min:numOrNull(cfg&&cfg.rightMin), max:numOrNull(cfg&&cfg.rightMax),
+          yR:{position:'right',grid:{drawOnChartArea:false},min:ax.Rmin,max:ax.Rmax,
               ticks:{font:{size:10},callback:function(v){return si(v);}}}
         }}
     });
