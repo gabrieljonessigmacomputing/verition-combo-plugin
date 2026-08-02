@@ -53,24 +53,36 @@
     if(v instanceof Date){ return (v.getUTCMonth()+1)+'/'+String(v.getUTCFullYear()).slice(2); }
     return String(v);
   }
-  // Compute left/right axis ranges so the TWO ZEROS sit at the same pixel height.
-  // left zero fraction f = (0-Lmin)/(Lmax-Lmin); we pick Rmin/Rmax so the right zero
-  // lands at the same f, while still showing all line data (+headroom).
+  // nice round step >= x (1/2/2.5/5/10 * 10^n)
+  function niceStep(x){ if(!(x>0)) return 1; var e=Math.pow(10,Math.floor(Math.log10(x))), f=x/e;
+    return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*e; }
+
+  // Aligned dual axis with NICE round ticks: both axes use the SAME count of intervals
+  // below/above zero, so every gridline (and zero) lines up, and bounds are round numbers.
   function computeAxes(bars,lines,cfg){
-    var padf = 1 + (Number((cfg&&cfg.pad)||8)||8)/100;
+    var padf=1+(Number((cfg&&cfg.pad)||8)||8)/100, TICKS=8;
     var bMax=0,bMin=0,lMax=0,lMin=0,i,v;
     for(i=0;i<bars.length;i++){v=Number(bars[i]); if(!isNaN(v)){if(v>bMax)bMax=v; if(v<bMin)bMin=v;}}
     for(i=0;i<lines.length;i++){v=Number(lines[i]); if(!isNaN(v)){if(v>lMax)lMax=v; if(v<lMin)lMin=v;}}
-    var Lmax=bMax*padf, Lmin=bMin*padf; if(Lmax===0&&Lmin===0)Lmax=1;
-    if(cfg&&cfg.alignZero===false){
-      return {Lmin:Lmin,Lmax:Lmax,Rmin:Math.min(0,lMin)*padf,Rmax:(Math.max(0,lMax)||1)*padf};
+    // LEFT: nice step + integer tick counts below/above zero
+    var lRange=(Math.max(bMax,0)-Math.min(bMin,0))||Math.abs(bMax||bMin||1);
+    var lStep=niceStep(lRange*padf/TICKS);
+    var below=Math.max(0,Math.ceil((-Math.min(bMin,0))/lStep));
+    var above=Math.max(1,Math.ceil((Math.max(bMax,0))/lStep));
+    var out={Lmin:-below*lStep,Lmax:above*lStep,Lstep:lStep};
+    var align=!(cfg&&cfg.alignZero===false);
+    if(align){
+      // RIGHT reuses the SAME below/above counts -> zero + every gridline align
+      var needR=Math.max(above>0?Math.max(lMax,0)/above:0, below>0?(-Math.min(lMin,0))/below:0);
+      var rStep=niceStep((needR||Math.abs(lMax||1)/above)*padf); if(!(rStep>0))rStep=1;
+      out.Rmin=-below*rStep; out.Rmax=above*rStep; out.Rstep=rStep;
+    }else{
+      var rRange=(Math.max(lMax,0)-Math.min(lMin,0))||Math.abs(lMax||1);
+      var rStep2=niceStep(rRange*padf/TICKS);
+      var rb=Math.max(0,Math.ceil((-Math.min(lMin,0))/rStep2)), ra=Math.max(1,Math.ceil(Math.max(lMax,0)/rStep2));
+      out.Rmin=-rb*rStep2; out.Rmax=ra*rStep2; out.Rstep=rStep2;
     }
-    var f=(0-Lmin)/(Lmax-Lmin); if(!isFinite(f)||f<0)f=0; if(f>1)f=1;
-    var Rhi=Math.max(0,lMax), Rlo=Math.min(0,lMin);
-    if(f<=0) return {Lmin:Lmin,Lmax:Lmax,Rmin:0,Rmax:(Rhi||1)*padf};
-    if(f>=1) return {Lmin:Lmin,Lmax:Lmax,Rmin:(Rlo||-1)*padf,Rmax:0};
-    var T=Math.max(Rhi/(1-f), (Rlo<0?(-Rlo)/f:0))*padf; if(T<=0)T=1;
-    return {Lmin:Lmin,Lmax:Lmax,Rmin:-f*T,Rmax:(1-f)*T};
+    return out;
   }
 
   function draw(labels,bars,lines,cfg){
@@ -95,9 +107,11 @@
         scales:{
           x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,font:{size:10}}},
           yL:{position:'left',grid:{color:'#eef2f7'},min:ax.Lmin,max:ax.Lmax,
-              ticks:{font:{size:10},callback:function(v){return si(v);}}},
+              ticks:{font:{size:10},stepSize:ax.Lstep,callback:function(v){return si(v);}}},
           yR:{position:'right',grid:{drawOnChartArea:false},min:ax.Rmin,max:ax.Rmax,
-              ticks:{font:{size:10},callback:function(v){return si(v);}}}
+              ticks:{font:{size:10},stepSize:ax.Rstep,
+                     // hide the negative headroom labels: right axis reads as "starts at $0, higher up"
+                     callback:function(v){return v<0?'':si(v);}}}
         }}
     });
   }
