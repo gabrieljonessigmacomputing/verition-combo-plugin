@@ -6,6 +6,7 @@
 <title>Verition Combo — dual-axis bar + line</title>
 <script src="https://unpkg.com/@sigmacomputing/plugin"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -36,7 +37,11 @@
     {name:'barLabel',type:'text',label:'Left-axis label',defaultValue:'Daily Gross PnL'},
     {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
     {name:'alignZero',type:'toggle',label:'Align left & right zero baselines',defaultValue:true},
-    {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'}
+    {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'},
+    {name:'labels',type:'dropdown',label:'Data labels',
+     values:['None','All (100%)','Every 10%','Every 25%','Min & Max','First & Last'],defaultValue:'Min & Max'},
+    {name:'labelSeries',type:'dropdown',label:'Label which series',
+     values:['Line only','Bars only','Both'],defaultValue:'Line only'}
   ];
   if(client) client.config.configureEditorPanel(defs);
 
@@ -85,6 +90,19 @@
     return out;
   }
 
+  // which point indices get a data label, per mode (answers "% of data labels")
+  function labelIndices(data,mode){
+    var n=data.length, s=new Set(); if(!n||mode==='None') return s;
+    var v=data.map(Number);
+    if(mode==='All (100%)'){ for(var i=0;i<n;i++) s.add(i); return s; }
+    if(mode==='Min & Max'){ var mn=0,mx=0; for(var i=1;i<n;i++){ if(v[i]<v[mn])mn=i; if(v[i]>v[mx])mx=i; } s.add(mn);s.add(mx); return s; }
+    if(mode==='First & Last'){ s.add(0); s.add(n-1); return s; }
+    var pct = mode==='Every 10%'?0.10 : mode==='Every 25%'?0.25 : 1;
+    var step=Math.max(1,Math.round(1/pct));
+    for(var i=0;i<n;i+=step) s.add(i);
+    s.add(n-1); return s;                       // always keep the latest point
+  }
+
   function draw(labels,bars,lines,cfg){
     document.getElementById('ttl').textContent=(cfg&&cfg.title)||'YTD PnL';
     var empty=!labels.length;
@@ -94,7 +112,12 @@
     var ctx=document.getElementById('cv').getContext('2d');
     if(chart) chart.destroy();
     var ax=computeAxes(bars,lines,cfg);
+    // data-label index sets (customizable %: 100% / 10% / 25% / min-max / first-last / none)
+    var mode=(cfg&&cfg.labels)||'Min & Max', tgt=(cfg&&cfg.labelSeries)||'Line only';
+    var barSet=(tgt==='Bars only'||tgt==='Both')?labelIndices(bars,mode):new Set();
+    var lineSet=(tgt==='Line only'||tgt==='Both')?labelIndices(lines,mode):new Set();
     chart=new Chart(ctx,{
+      plugins:[ChartDataLabels],
       data:{labels:labels,datasets:[
         {type:'bar',label:(cfg&&cfg.barLabel)||'Bars',data:bars,yAxisID:'yL',
          backgroundColor:BLUE,borderColor:BLUE,barPercentage:0.9,categoryPercentage:0.96,order:2},
@@ -102,8 +125,17 @@
          borderColor:NAVY,backgroundColor:NAVY,borderWidth:2,pointRadius:0,tension:0.25,order:1}
       ]},
       options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        layout:{padding:{top:16}},
         plugins:{legend:{display:true,position:'top',labels:{boxWidth:12,font:{size:11}}},
-          tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+si(c.parsed.y);}}}},
+          tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+si(c.parsed.y);}}},
+          datalabels:{
+            display:function(c){ return c.datasetIndex===0 ? barSet.has(c.dataIndex) : lineSet.has(c.dataIndex); },
+            formatter:function(v){ return si(v); },
+            color:function(c){ return c.datasetIndex===0 ? BLUE : NAVY; },
+            font:{size:9,weight:'bold'}, clip:false,
+            anchor:function(c){ return c.dataset.data[c.dataIndex]<0?'start':'end'; },
+            align:function(c){ return c.dataset.data[c.dataIndex]<0?'bottom':'top'; }
+          }},
         scales:{
           x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,font:{size:10}}},
           yL:{position:'left',grid:{color:'#eef2f7'},min:ax.Lmin,max:ax.Lmax,
