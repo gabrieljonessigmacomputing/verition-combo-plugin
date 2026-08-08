@@ -38,10 +38,7 @@
     {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
     {name:'alignZero',type:'toggle',label:'Align left & right zero baselines',defaultValue:true},
     {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'},
-    {name:'labels',type:'dropdown',label:'Data labels',
-     values:['None','All (100%)','Every 10%','Every 25%','Min & Max','First & Last'],defaultValue:'Min & Max'},
-    {name:'labelSeries',type:'dropdown',label:'Label which series',
-     values:['Line only','Bars only','Both'],defaultValue:'Line only'}
+    {name:'mode',type:'column',source:'source',label:'Data-label mode (bind to labelMode column, driven by an on-page control)'}
   ];
   if(client) client.config.configureEditorPanel(defs);
 
@@ -103,7 +100,7 @@
     s.add(n-1); return s;                       // always keep the latest point
   }
 
-  function draw(labels,bars,lines,cfg){
+  function draw(labels,bars,lines,cfg,mode){
     document.getElementById('ttl').textContent=(cfg&&cfg.title)||'YTD PnL';
     var empty=!labels.length;
     document.getElementById('empty').style.display=empty?'flex':'none';
@@ -113,9 +110,9 @@
     if(chart) chart.destroy();
     var ax=computeAxes(bars,lines,cfg);
     // data-label index sets (customizable %: 100% / 10% / 25% / min-max / first-last / none)
-    var mode=(cfg&&cfg.labels)||'Min & Max', tgt=(cfg&&cfg.labelSeries)||'Line only';
-    var barSet=(tgt==='Bars only'||tgt==='Both')?labelIndices(bars,mode):new Set();
-    var lineSet=(tgt==='Line only'||tgt==='Both')?labelIndices(lines,mode):new Set();
+    var lm=mode||'Min & Max';           // driven by the on-page control via the bound column
+    var barSet=new Set();               // labels applied to the cumulative LINE (the meaningful series)
+    var lineSet=labelIndices(lines,lm);
     chart=new Chart(ctx,{
       plugins:[ChartDataLabels],
       data:{labels:labels,datasets:[
@@ -164,7 +161,10 @@
     order.sort(function(a,b){return (a>b?1:a<b?-1:0);});
     var labels=[],bars=[],lines=[];
     order.forEach(function(k){var r=agg[k];labels.push(fmtX(r.x));bars.push(r.bar);lines.push(r.line);});
-    draw(labels,bars,lines,cfg);
+    // resolve the data-label mode from the bound column (first non-empty value)
+    var mode='Min & Max';
+    if(cfg.mode && data[cfg.mode]){ var mm=data[cfg.mode]; for(var j=0;j<mm.length;j++){ if(mm[j]!=null&&mm[j]!==''){ mode=String(mm[j]); break; } } }
+    draw(labels,bars,lines,cfg,mode);
   }
 
   if(client){
@@ -180,7 +180,7 @@
     // standalone synthetic fallback (so it previews outside Sigma)
     var L=[],B=[],C=[],cum=0;
     for(var m=0;m<12;m++){var d=(Math.random()-0.42)*4e8;cum+=d;L.push((m+1)+'/26');B.push(d);C.push(Math.max(0,cum));}
-    draw(L,B,C,{title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL',rightMin:'0'});
+    draw(L,B,C,{title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL'},'Min & Max');
   }
 })();
 </script>
