@@ -12,14 +12,20 @@
   html,body{height:100%}
   body{font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;background:transparent;color:#0B2E4F;overflow:hidden}
   #wrap{height:100%;width:100%;padding:8px 10px 4px;display:flex;flex-direction:column}
-  #ttl{font-size:14px;font-weight:700;color:#0B2E4F;margin-bottom:2px}
+  #top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:3px}
+  #ttl{font-size:14px;font-weight:700;color:#0B2E4F}
+  #ctrls{display:flex;align-items:center;gap:0;background:#eef2f7;border-radius:12px;padding:2px}
+  #ctrls .lbl{font-size:9px;color:#7a8aa0;margin:0 6px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+  #ctrls button{font:inherit;font-size:10px;padding:3px 9px;border:0;background:transparent;color:#33475b;border-radius:10px;cursor:pointer;line-height:1.4;white-space:nowrap}
+  #ctrls button.active{background:#0B2E4F;color:#fff;font-weight:600}
+  #ctrls button:hover:not(.active){color:#0B2E4F}
   #cv{flex:1;min-height:0}
   #empty{display:none;height:100%;align-items:center;justify-content:center;color:#9aa;font-size:14px}
 </style>
 </head>
 <body>
 <div id="wrap">
-  <div id="ttl">YTD PnL</div>
+  <div id="top"><div id="ttl">YTD PnL</div><div id="ctrls"></div></div>
   <canvas id="cv"></canvas>
   <div id="empty">No data</div>
 </div>
@@ -37,10 +43,28 @@
     {name:'barLabel',type:'text',label:'Left-axis label',defaultValue:'Daily Gross PnL'},
     {name:'lineLabel',type:'text',label:'Right-axis label',defaultValue:'Cumulative YTD PnL'},
     {name:'alignZero',type:'toggle',label:'Align left & right zero baselines',defaultValue:true},
-    {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'},
-    {name:'mode',type:'column',source:'source',label:'Data-label mode (bind to labelMode column, driven by an on-page control)'}
+    {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'}
   ];
   if(client) client.config.configureEditorPanel(defs);
+
+  // ---- in-viz data-label toggle (rendered inside the plugin; no editor/config needed) ----
+  var state={labels:[],bars:[],lines:[],cfg:{},mode:'Min & Max'};
+  var MODES=[['All','All (100%)'],['10%','Every 10%'],['25%','Every 25%'],['Min/Max','Min & Max'],['Ends','First & Last'],['Off','None']];
+  function render(){ draw(state.labels,state.bars,state.lines,state.cfg,state.mode); }
+  function syncButtons(){
+    var c=document.getElementById('ctrls'); if(!c) return;
+    Array.prototype.forEach.call(c.querySelectorAll('button'),function(b){ b.classList.toggle('active', b.getAttribute('data-mode')===state.mode); });
+  }
+  (function buildButtons(){
+    var c=document.getElementById('ctrls');
+    var lab=document.createElement('span'); lab.className='lbl'; lab.textContent='Labels'; c.appendChild(lab);
+    MODES.forEach(function(m){
+      var b=document.createElement('button'); b.textContent=m[0]; b.setAttribute('data-mode',m[1]);
+      b.onclick=function(){ state.mode=m[1]; syncButtons(); render(); };
+      c.appendChild(b);
+    });
+    syncButtons();
+  })();
 
   var chart=null;
   function si(v){ // compact $ formatting
@@ -161,10 +185,8 @@
     order.sort(function(a,b){return (a>b?1:a<b?-1:0);});
     var labels=[],bars=[],lines=[];
     order.forEach(function(k){var r=agg[k];labels.push(fmtX(r.x));bars.push(r.bar);lines.push(r.line);});
-    // resolve the data-label mode from the bound column (first non-empty value)
-    var mode='Min & Max';
-    if(cfg.mode && data[cfg.mode]){ var mm=data[cfg.mode]; for(var j=0;j<mm.length;j++){ if(mm[j]!=null&&mm[j]!==''){ mode=String(mm[j]); break; } } }
-    draw(labels,bars,lines,cfg,mode);
+    state.labels=labels; state.bars=bars; state.lines=lines; state.cfg=cfg;   // label mode kept from the in-viz toggle
+    render();
   }
 
   if(client){
@@ -180,7 +202,8 @@
     // standalone synthetic fallback (so it previews outside Sigma)
     var L=[],B=[],C=[],cum=0;
     for(var m=0;m<12;m++){var d=(Math.random()-0.42)*4e8;cum+=d;L.push((m+1)+'/26');B.push(d);C.push(Math.max(0,cum));}
-    draw(L,B,C,{title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL'},'Min & Max');
+    state.labels=L; state.bars=B; state.lines=C; state.cfg={title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL'};
+    render();
   }
 })();
 </script>
