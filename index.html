@@ -16,9 +16,8 @@
   #ttl{font-size:14px;font-weight:700;color:#0B2E4F}
   #ctrls{display:flex;align-items:center;gap:0;background:#eef2f7;border-radius:12px;padding:2px}
   #ctrls .lbl{font-size:9px;color:#7a8aa0;margin:0 6px 0 4px;text-transform:uppercase;letter-spacing:.05em}
-  #ctrls button{font:inherit;font-size:10px;padding:3px 9px;border:0;background:transparent;color:#33475b;border-radius:10px;cursor:pointer;line-height:1.4;white-space:nowrap}
-  #ctrls button.active{background:#0B2E4F;color:#fff;font-weight:600}
-  #ctrls button:hover:not(.active){color:#0B2E4F}
+  #ctrls input[type=range]{width:130px;accent-color:#0B2E4F;cursor:pointer;vertical-align:middle}
+  #ctrls #pctv{font-size:11px;font-weight:600;color:#0B2E4F;margin-left:6px;min-width:34px;text-align:right}
   #cv{flex:1;min-height:0}
   #empty{display:none;height:100%;align-items:center;justify-content:center;color:#9aa;font-size:14px}
 </style>
@@ -47,23 +46,16 @@
   ];
   if(client) client.config.configureEditorPanel(defs);
 
-  // ---- in-viz data-label toggle (rendered inside the plugin; no editor/config needed) ----
-  var state={labels:[],bars:[],lines:[],cfg:{},mode:'Min & Max'};
-  var MODES=[['All','All (100%)'],['10%','Every 10%'],['25%','Every 25%'],['Min/Max','Min & Max'],['Ends','First & Last'],['Off','None']];
-  function render(){ draw(state.labels,state.bars,state.lines,state.cfg,state.mode); }
-  function syncButtons(){
-    var c=document.getElementById('ctrls'); if(!c) return;
-    Array.prototype.forEach.call(c.querySelectorAll('button'),function(b){ b.classList.toggle('active', b.getAttribute('data-mode')===state.mode); });
-  }
-  (function buildButtons(){
+  // ---- in-viz data-label % slider (rendered inside the plugin; no editor/config needed) ----
+  var state={labels:[],bars:[],lines:[],cfg:{},pct:30};
+  function render(){ draw(state.labels,state.bars,state.lines,state.cfg,state.pct); }
+  (function buildSlider(){
     var c=document.getElementById('ctrls');
-    var lab=document.createElement('span'); lab.className='lbl'; lab.textContent='Labels'; c.appendChild(lab);
-    MODES.forEach(function(m){
-      var b=document.createElement('button'); b.textContent=m[0]; b.setAttribute('data-mode',m[1]);
-      b.onclick=function(){ state.mode=m[1]; syncButtons(); render(); };
-      c.appendChild(b);
-    });
-    syncButtons();
+    var lab=document.createElement('span'); lab.className='lbl'; lab.textContent='Labels';
+    var sl=document.createElement('input'); sl.type='range'; sl.min='0'; sl.max='100'; sl.step='5'; sl.value=String(state.pct); sl.id='pct';
+    var out=document.createElement('span'); out.id='pctv'; out.textContent=state.pct+'%';
+    sl.oninput=function(){ state.pct=Number(sl.value); out.textContent=state.pct+'%'; render(); };
+    c.appendChild(lab); c.appendChild(sl); c.appendChild(out);
   })();
 
   var chart=null;
@@ -111,20 +103,19 @@
     return out;
   }
 
-  // which point indices get a data label, per mode (answers "% of data labels")
-  function labelIndices(data,mode){
-    var n=data.length, s=new Set(); if(!n||mode==='None') return s;
-    var v=data.map(Number);
-    if(mode==='All (100%)'){ for(var i=0;i<n;i++) s.add(i); return s; }
-    if(mode==='Min & Max'){ var mn=0,mx=0; for(var i=1;i<n;i++){ if(v[i]<v[mn])mn=i; if(v[i]>v[mx])mx=i; } s.add(mn);s.add(mx); return s; }
-    if(mode==='First & Last'){ s.add(0); s.add(n-1); return s; }
-    var pct = mode==='Every 10%'?0.10 : mode==='Every 25%'?0.25 : 1;
-    var step=Math.max(1,Math.round(1/pct));
-    for(var i=0;i<n;i+=step) s.add(i);
-    s.add(n-1); return s;                       // always keep the latest point
+  // which point indices get a data label — show `pct`% of them, evenly spaced (incl. first & last)
+  function labelIndices(n,pct){
+    var s=new Set();
+    if(!n||pct<=0) return s;
+    if(pct>=100){ for(var i=0;i<n;i++) s.add(i); return s; }
+    var count=Math.max(1,Math.round(n*pct/100));
+    if(count===1){ s.add(n-1); return s; }       // just the latest point
+    var step=(n-1)/(count-1);
+    for(var k=0;k<count;k++) s.add(Math.round(k*step));
+    return s;
   }
 
-  function draw(labels,bars,lines,cfg,mode){
+  function draw(labels,bars,lines,cfg,pct){
     document.getElementById('ttl').textContent=(cfg&&cfg.title)||'YTD PnL';
     var empty=!labels.length;
     document.getElementById('empty').style.display=empty?'flex':'none';
@@ -133,10 +124,9 @@
     var ctx=document.getElementById('cv').getContext('2d');
     if(chart) chart.destroy();
     var ax=computeAxes(bars,lines,cfg);
-    // data-label index sets (customizable %: 100% / 10% / 25% / min-max / first-last / none)
-    var lm=mode||'Min & Max';           // driven by the on-page control via the bound column
-    var barSet=new Set();               // labels applied to the cumulative LINE (the meaningful series)
-    var lineSet=labelIndices(lines,lm);
+    // data-label index sets — show `pct`% of labels on the cumulative LINE (the meaningful series)
+    var barSet=new Set();
+    var lineSet=labelIndices(lines.length, (pct==null?30:pct));
     chart=new Chart(ctx,{
       plugins:[ChartDataLabels],
       data:{labels:labels,datasets:[
