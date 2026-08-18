@@ -4,9 +4,9 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Verition Combo — dual-axis bar + line</title>
-<script src="https://unpkg.com/@sigmacomputing/plugin"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="./sigma-plugin.js"></script>
+<script src="./chart.umd.min.js"></script>
+<script src="./chartjs-plugin-datalabels.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -30,7 +30,8 @@
 </div>
 <script>
 (function(){
-  var client=(window.sigmaComputing&&window.sigmaComputing.plugin&&window.sigmaComputing.plugin.client)||null;
+  // @sigmacomputing/plugin UMD exposes the client as window.SigmaPlugin.client (NOT window.sigmaComputing)
+  var client=(window.SigmaPlugin&&window.SigmaPlugin.client)||null;
   var NAVY="#0B2E4F", BLUE="#2E6BB8";
   var defs=[
     {name:'source',type:'element'},
@@ -44,8 +45,6 @@
     {name:'alignZero',type:'toggle',label:'Align left & right zero baselines',defaultValue:true},
     {name:'pad',type:'text',label:'Axis headroom % (default 8)',defaultValue:'8'}
   ];
-  if(client) client.config.configureEditorPanel(defs);
-
   // ---- in-viz data-label % slider (rendered inside the plugin; no editor/config needed) ----
   var state={labels:[],bars:[],lines:[],cfg:{},pct:30};
   function render(){ draw(state.labels,state.bars,state.lines,state.cfg,state.pct); }
@@ -179,8 +178,10 @@
     render();
   }
 
-  if(client){
-    var st={cfg:null,unsub:null};
+  // ---- connect to Sigma and stream REAL element data ----
+  var st={cfg:null,unsub:null};
+  function wireData(client){
+    client.config.configureEditorPanel(defs);
     client.config.subscribe(function(cfg){
       st.cfg=cfg||{};
       if(st.unsub){st.unsub();st.unsub=null;}
@@ -188,13 +189,19 @@
         st.unsub=client.elements.subscribeToElementData(cfg.source,function(d){recompute(d,st.cfg);});
       }else{ recompute(null,st.cfg); }
     });
-  }else{
-    // standalone synthetic fallback (so it previews outside Sigma)
+  }
+  var tries=0;
+  (function waitForClient(){
+    var c=(window.SigmaPlugin&&window.SigmaPlugin.client)||null;   // correct SDK global
+    if(c){ wireData(c); return; }
+    if(++tries<60){ setTimeout(waitForClient,50); return; }        // ~3s grace for async init
+    // genuinely opened OUTSIDE Sigma -> clearly-labelled sample so it's never mistaken for real
     var L=[],B=[],C=[],cum=0;
     for(var m=0;m<12;m++){var d=(Math.random()-0.42)*4e8;cum+=d;L.push((m+1)+'/26');B.push(d);C.push(Math.max(0,cum));}
-    state.labels=L; state.bars=B; state.lines=C; state.cfg={title:'YTD PnL (demo)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL'};
+    state.labels=L; state.bars=B; state.lines=C;
+    state.cfg={title:'YTD PnL (sample — not connected to Sigma)',barLabel:'Daily Gross PnL',lineLabel:'Cumulative YTD PnL'};
     render();
-  }
+  })();
 })();
 </script>
 </body>
