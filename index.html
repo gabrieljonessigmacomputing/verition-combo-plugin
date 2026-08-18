@@ -4,6 +4,22 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Verition Combo — dual-axis bar + line</title>
+<script>
+// @sigmacomputing/plugin's UMD factory calls React.createContext(...) at module load time
+// (to build its internal client context), even though this plugin never uses React hooks --
+// it only uses the classic client.config/client.elements callback API. Without window.React
+// present, that top-level call throws "u.createContext is not a function" and the module
+// crashes before it ever assigns SigmaPlugin.client. A minimal shim is enough to satisfy it.
+window.React = window.React || {
+  createContext: function(defaultValue){ return {Provider:function(){}, Consumer:function(){}, _currentValue:defaultValue}; },
+  createElement: function(){ return null; },
+  useContext: function(ctx){ return ctx && ctx._currentValue; },
+  useState: function(initial){ return [typeof initial==='function'?initial():initial, function(){}]; },
+  useEffect: function(){},
+  useRef: function(initial){ return {current:initial}; },
+  useCallback: function(fn){ return fn; }
+};
+</script>
 <script src="./sigma-plugin.js"></script>
 <script src="./chart.umd.min.js"></script>
 <script src="./chartjs-plugin-datalabels.min.js"></script>
